@@ -1,0 +1,65 @@
+services:
+  # ============================================================
+  # 1. Nexora FastAPI Core Engine
+  # ============================================================
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: nexora-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+      - "8001:8000"
+    env_file:
+      - ./backend/.env
+    environment:
+      - APP_ENV=production
+      - PORT=8000
+      - CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 2s
+    networks:
+      - nexora-net
+
+  # ============================================================
+  # 2. Nexora Next.js Frontend UI
+  # ============================================================
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: nexora-web
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+      - "3001:3000"
+    environment:
+      - NODE_ENV=production
+    depends_on:
+      - api
+    networks:
+      - nexora-net
+
+  # ============================================================
+  # 3. Isolated Sandbox Runner Base Image
+  # ============================================================
+  sandbox-runner:
+    build:
+      context: ./sandbox
+      dockerfile: Dockerfile
+    image: nexora-sandbox:latest
+    container_name: nexora-sandbox-template
+    entrypoint: ["echo", "Nexora Sandbox Runner Image ready"]
+    networks:
+      - nexora-net
+
+networks:
+  nexora-net:
+    driver: bridge

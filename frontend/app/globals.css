@@ -1,0 +1,98 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --canvas: #12141C;
+    --surface: #1A1D28;
+    --surface-raised: #242838;
+    --border: #2B2F3D;
+    --border-strong: #3A3F52;
+    --text-primary: #E7E9F2;
+    --text-muted: #8D91A6;
+    --text-faint: #5E6275;
+    --diff-add: #4CB782;
+    --diff-add-bg: #1B2B23;
+    --diff-remove: #E0594A;
+    --diff-remove-bg: #2E1D1B;
+    --agent-active: #E3A73B;
+    --agent-active-bg: #2E260F;
+    --link: #6C9BFF;
+  }
+}
+
+body {
+  background-color: var(--canvas);
+  color: var(--text-primary);
+  font-family: var(--font-inter), system-ui, -apple-system, sans-serif;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+h1, h2, h3, .font-heading {
+  font-family: var(--font-space-grotesk), sans-serif;
+}
+
+code, pre, .font-mono {
+  font-family: var(--font-jetbrains-mono), monospace;
+}
+
+/* Custom scrollbars matching the dark engineering theme */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: var(--canvas);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-faint);
+}
+
+/* Signature Element: The Diff Rail (Section 2) */
+.diff-rail-add {
+  border-left: 3px solid var(--diff-add) !important;
+}
+
+.diff-rail-remove {
+  border-left: 3px solid var(--diff-remove) !important;
+}
+
+.diff-rail-active {
+  border-left: 3px solid var(--agent-active) !important;
+}
+
+.diff-rail-neutral {
+  border-left: 3px solid var(--border-strong) !important;
+}
+
+/* Approval Gate Elevation Shadow (Section 1.3) */
+.shadow-modal {
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+}
+
+/* Smooth motion for active agent dot (Section 6) */
+@keyframes agent-pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.4;
+    transform: scale(0.9);
+  }
+}
+
+.animate-agent-pulse {
+  animation: agent-pulse 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-agent-pulse {
+    animation: none;
+    opacity: 1;
+  }
+}

@@ -1,0 +1,66 @@
+# ============================================================
+# Nexora GitLab CI/CD Pipeline
+# ============================================================
+
+stages:
+  - test
+  - deploy
+
+variables:
+  GCP_REGION: "asia-southeast2"
+  SERVICE_NAME: "nexora-api"
+  IMAGE_NAME: "asia-southeast2-docker.pkg.dev/$GCP_PROJECT_ID/nexora-repo/nexora-backend"
+
+# ------------------------------------------------------------
+# 1. Backend Pytest & Frontend Build Verification
+# ------------------------------------------------------------
+test_backend:
+  stage: test
+  image: python:3.10-slim
+  script:
+    - cd backend
+    - pip install --upgrade pip
+    - pip install -r requirements.txt
+    - pip install pytest pytest-asyncio httpx
+    - pytest -v
+
+test_frontend:
+  stage: test
+  image: node:20-alpine
+  script:
+    - cd frontend
+    - npm ci
+    - npm run build
+  variables:
+    NEXT_PUBLIC_API_URL: ""
+
+# ------------------------------------------------------------
+# 2. Deploy to Google Cloud Run (Free Tier Compatible)
+# ------------------------------------------------------------
+deploy_cloud_run:
+  stage: deploy
+  image: google/cloud-sdk:alpine
+  only:
+    - main
+    - master
+  before_script:
+    - echo "$GCP_SERVICE_KEY" | base64 -d > /tmp/gcp-key.json
+    - gcloud auth activate-service-account --key-file=/tmp/gcp-key.json
+    - gcloud config set project "$GCP_PROJECT_ID"
+    - gcloud auth configure-docker asia-southeast2-docker.pkg.dev --quiet
+  script:
+    - docker build -t "$IMAGE_NAME:$CI_COMMIT_SHA" -t "$IMAGE_NAME:latest" ./backend
+    - docker push "$IMAGE_NAME:$CI_COMMIT_SHA"
+    - docker push "$IMAGE_NAME:latest"
+    - >
+      gcloud run deploy $SERVICE_NAME
+      --image "$IMAGE_NAME:$CI_COMMIT_SHA"
+      --region $GCP_REGION
+      --platform managed
+      --port 8000
+      --memory 512Mi
+      --cpu 1
+      --min-instances 0
+      --max-instances 2
+      --allow-unauthenticated
+      --set-env-vars="GEMINI_API_KEY=$GEMINI_API_KEY,SUPABASE_URL=$SUPABASE_URL,SUPABASE_SERVICE_ROLE_KEY=$SUPABASE_SERVICE_ROLE_KEY,CORS_ORIGINS=*"

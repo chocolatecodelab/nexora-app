@@ -1,0 +1,22 @@
+services:
+  # ============================================================
+  # Nexora FastAPI Backend Web Service
+  # ============================================================
+  - type: web
+    name: nexora-api
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: free
+    region: singapore # or oregon / frankfurt
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: CORS_ORIGINS
+        value: "*"
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
