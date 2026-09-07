@@ -1,36 +1,82 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Nexora AI — Frontend Workstation
 
-## Getting Started
+A developer-grade workstation UI for **Nexora AI** — Autonomous Agentic Software Engineering Platform. Built with Next.js 16 (App Router), React 19, Tailwind CSS v4, Lucide Icons, and TypeScript.
 
-First, run the development server:
+---
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## 🧭 Overview
+
+The Nexora frontend provides a real-time, terminal-inspired cockpit where developers supervise, inspect, and interact with autonomous AI coding agents.
+
+Key UI modules:
+- **Agent Cockpit & Pipeline Tracker**: Real-time visual progress stepper through Planning, Coding, Execution, Testing, and PR Creation stages.
+- **Interactive Code Diff Viewer**: Side-by-side / unified diff viewer showing code modifications proposed by the AI engineer.
+- **Observability & Tool Logs**: Live streaming execution logs, shell command outputs, and sandbox container feedback.
+- **Pre-flight Security Guardrail Card**: Real-time secret and syntax validation reports before any code is committed.
+- **Task Management & History**: Filter, inspect, restart, or safely purge task states with live counters.
+- **Evaluation & Benchmarks**: Real-time metrics for agent success rates, test pass percentage, and token economy.
+
+---
+
+## 🛠️ Tech Stack
+
+- **Framework**: [Next.js 16](https://nextjs.org/) (App Router, Server & Client Components)
+- **Library**: [React 19](https://react.dev/)
+- **Styling**: [Tailwind CSS v4](https://tailwindcss.com/)
+- **Icons**: [Lucide React](https://lucide.dev/)
+- **Language**: TypeScript 5+
+
+---
+
+## 📁 Component Structure
+
+```
+frontend/
+├── app/
+│   ├── favicon.ico
+│   ├── globals.css          # Design tokens & base styling
+│   ├── layout.tsx           # App root layout & metadata
+│   └── page.tsx             # Main workstation dashboard
+├── components/
+│   ├── AuthAccountModal.tsx        # Git provider authentication
+│   ├── CodeDiffViewer.tsx          # Git diff visualizer
+│   ├── CommitHistoryTab.tsx        # Commit log browser
+│   ├── EvaluationTab.tsx           # Agent benchmarks & metrics
+│   ├── ImplementationPlanCard.tsx  # Plan approval card
+│   ├── IssueSelector.tsx           # Issue picker & manual creator
+│   ├── Navbar.tsx                  # Workstation header & repo picker
+│   ├── ObservabilityLogs.tsx       # Live terminal log stream
+│   ├── PlanReviewModal.tsx         # Detailed plan inspector modal
+│   ├── ProgressStepper.tsx         # 5-stage pipeline progress indicator
+│   ├── SecurityGuardrailCard.tsx   # Pre-flight security report
+│   ├── SettingsTab.tsx             # Project & branch configuration
+│   ├── Sidebar.tsx                 # Workstation tab navigation & status
+│   ├── StatusBadge.tsx             # Monospaced status pill
+│   ├── TaskCommentPanel.tsx        # Human-in-the-loop task chat
+│   ├── TaskPipeline.tsx            # Pipeline execution coordinator
+│   └── ToolLogViewer.tsx           # Granular tool execution audit
+├── lib/
+│   └── api.ts               # Resilient API client (dual local/docker support)
+└── types/
+    └── index.ts             # TypeScript definitions for Tasks, Logs, Diffs
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+---
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 🚀 Running Locally
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+# Install dependencies
+npm install
 
-## Learn More
+# Run dev server
+npm run dev
 
-To learn more about Next.js, take a look at the following resources:
+# Run production build check
+npm run build
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+The application will start at `http://localhost:3000`.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+### Backend Connection
+By default, the client dynamically determines the backend URL (`http://127.0.0.1:8000` for local dev, or `http://127.0.0.1:8001` when run through Docker Compose). You can also explicitly specify `NEXT_PUBLIC_API_URL` if connecting to a remote deployment.

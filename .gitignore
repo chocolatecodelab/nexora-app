@@ -19,8 +19,24 @@ backend/*.py[cod]
 !*.env.*.example
 *.local
 
-# IDE
+# IDE & OS
 .vscode/*
 !.vscode/settings.json
 .idea/
 *.swp
+.DS_Store
+Thumbs.db
+
+# Test & Coverage caches
+backend/.pytest_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+*.log
+
+# Auto-generated agent docs (Next.js dev tooling)
+frontend/AGENTS.md
+frontend/CLAUDE.md
+AGENTS.md
+CLAUDE.md
+

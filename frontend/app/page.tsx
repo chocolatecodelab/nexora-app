@@ -186,6 +186,14 @@ export default function Home() {
     async function init() {
       await refreshEngine();
 
+      if (typeof window !== "undefined") {
+        const params = new URLSearchParams(window.location.search);
+        const tab = params.get("tab") as NavTab | null;
+        if (tab && ["dashboard", "tasks", "history", "evaluation", "settings"].includes(tab)) {
+          setCurrentTab(tab);
+        }
+      }
+
       // Fetch projects
       try {
         const projs = await getProjects();
@@ -231,20 +239,37 @@ export default function Home() {
       try {
         const tasks = await listTasks();
         setAllTasks(tasks);
-        const inProgress = tasks.find((t) =>
-          [
-            "queued",
-            "analyzing_issue",
-            "analyzing_repo",
-            "planning",
-            "awaiting_approval",
-            "implementing",
-            "testing",
-            "debugging",
-            "pr_creating",
-          ].includes(t.status)
-        );
-        setActiveTask(inProgress || null);
+
+        const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
+        const taskIdParam = params?.get("taskId");
+        const viewTabParam = params?.get("viewTab") as "plan" | "diff" | "security" | "logs" | "comments" | null;
+
+        if (viewTabParam && ["plan", "diff", "security", "logs", "comments"].includes(viewTabParam)) {
+          setActiveTaskViewTab(viewTabParam);
+        }
+
+        if (taskIdParam) {
+          const target = tasks.find((t) => t.id === taskIdParam);
+          if (target) {
+            setActiveTask(target);
+            fetchTaskDetails(target.id);
+          }
+        } else {
+          const inProgress = tasks.find((t) =>
+            [
+              "queued",
+              "analyzing_issue",
+              "analyzing_repo",
+              "planning",
+              "awaiting_approval",
+              "implementing",
+              "testing",
+              "debugging",
+              "pr_creating",
+            ].includes(t.status)
+          );
+          setActiveTask(inProgress || null);
+        }
       } catch (err) {
         console.error("Failed to load tasks:", err);
       }
@@ -431,8 +456,12 @@ export default function Home() {
     };
   }, [activeTask?.id, activeTask?.status, fetchTaskDetails]);
 
-  // Auto-focus to Code Diff tab once PR is created or merged
+  // Auto-focus to Code Diff tab once PR is created or merged (unless explicitly requested via URL)
   useEffect(() => {
+    if (typeof window !== "undefined") {
+      const p = new URLSearchParams(window.location.search);
+      if (p.get("viewTab")) return;
+    }
     if (activeTask?.status === "pr_created" || activeTask?.status === "merged") {
       setActiveTaskViewTab("diff");
     }
