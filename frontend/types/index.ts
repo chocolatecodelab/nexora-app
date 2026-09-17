@@ -261,3 +261,10 @@ export interface EvaluationMetricsResponse {
   window: string;
 }
 
+export interface TaskFullDetails {
+  task: Task;
+  runs: AgentRun[];
+  tool_calls: Record<string, ToolCall[]>;
+  comments: TaskComment[];
+}
+

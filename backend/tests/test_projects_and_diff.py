@@ -102,6 +102,7 @@ def test_tasks_lifecycle_diff_and_security():
                 "status": "pr_created",
                 "plan_json": {
                     "summary": "Update token TTL",
+                    "risk": "low",
                     "files_to_modify": ["src/auth.ts"],
                     "files_to_create": ["src/auth.test.ts"],
                     "steps": ["Step 1", "Step 2"],
@@ -158,6 +159,17 @@ def test_tasks_lifecycle_diff_and_security():
         comments_list = client.get(f"/api/tasks/{task_id}/comments").json()
         assert len(comments_list) >= 1
 
+        # 6.5 Test Aggregated Task Details (QA-PERF-001)
+        full_resp = client.get(f"/api/tasks/{task_id}/full")
+        assert full_resp.status_code == 200
+        full_data = full_resp.json()
+        assert "task" in full_data
+        assert full_data["task"]["id"] == task_id
+        assert "runs" in full_data
+        assert "tool_calls" in full_data
+        assert "comments" in full_data
+        assert len(full_data["comments"]) >= 1
+
         # 7. Test Close PR & Revert endpoints with mocked git_provider
         with patch("app.services.git_provider.close_pr_or_mr", new_callable=AsyncMock) as mock_close:
             mock_close.return_value = True
@@ -168,6 +180,11 @@ def test_tasks_lifecycle_diff_and_security():
             mock_revert.return_value = {"url": "https://github.com/owner/repo/pull/99", "type": "PR"}
             revert_resp = client.post(f"/api/tasks/{task_id}/revert")
             assert revert_resp.status_code == 200
+
+        # 8. Test Cascading Clear Task History (QA-FUNC-003)
+        clear_resp = client.delete(f"/api/tasks?project_id={proj_id}")
+        assert clear_resp.status_code == 200
+        assert "deleted_count" in clear_resp.json()
     finally:
         # Automated Teardown
         c = supabase_client._get_supabase()

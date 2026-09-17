@@ -19,7 +19,6 @@ import {
   ShieldAlert,
   ExternalLink,
   GitPullRequest,
-  Sparkles,
   Zap,
   Activity,
 } from "lucide-react";
@@ -104,6 +103,7 @@ export function EvaluationTab({ projects = [] }: EvaluationTabProps) {
             <select
               value={selectedProjectId}
               onChange={(e) => setSelectedProjectId(e.target.value)}
+              aria-label="Filter berdasarkan repositori"
               className="bg-transparent text-xs text-[#E7E9F2] focus:outline-none cursor-pointer pr-2"
             >
               <option value="" className="bg-[#1A1D28] text-[#E7E9F2]">

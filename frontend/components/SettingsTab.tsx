@@ -14,7 +14,6 @@ import {
   FolderGit2,
   FileCode2,
   Sliders,
-  Sparkles,
   GitPullRequest,
   CheckCircle2,
   Play,
@@ -24,6 +23,7 @@ import {
   AlertTriangle,
   RefreshCw,
   GitFork,
+  AlertCircle,
   X,
 } from "lucide-react";
 
@@ -61,6 +61,7 @@ export function SettingsTab({ projects, onProjectUpdated, onOpenAuthModal }: Set
 
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   // Remote Branches Management State
   const [remoteBranches, setRemoteBranches] = useState<string[]>([]);
@@ -70,10 +71,22 @@ export function SettingsTab({ projects, onProjectUpdated, onOpenAuthModal }: Set
   const [newBranchInput, setNewBranchInput] = useState("");
   const [newBranchBase, setNewBranchBase] = useState("main");
   const [branchActionFeedback, setBranchActionFeedback] = useState<string | null>(null);
+  const [branchError, setBranchError] = useState<string | null>(null);
 
   // Provider Accounts State
   const [provider, setProvider] = useState<"github" | "gitlab">("github");
   const [gitlabUrl, setGitlabUrl] = useState("https://gitlab.com");
+
+  // Escape key handler for create branch modal
+  useEffect(() => {
+    if (showCreateBranchModal) {
+      const handleKeyDown = (e: KeyboardEvent) => {
+        if (e.key === "Escape") setShowCreateBranchModal(false);
+      };
+      window.addEventListener("keydown", handleKeyDown);
+      return () => window.removeEventListener("keydown", handleKeyDown);
+    }
+  }, [showCreateBranchModal]);
 
   // Fetch branches for selected project
   const fetchBranches = useCallback(async (projId: string) => {
@@ -108,6 +121,7 @@ export function SettingsTab({ projects, onProjectUpdated, onOpenAuthModal }: Set
     if (!activeProject || !branchName.trim()) return;
     setIsCreatingBranch(true);
     setBranchActionFeedback(null);
+    setBranchError(null);
     try {
       await createProjectBranch(activeProject.id, branchName.trim(), base);
       await fetchBranches(activeProject.id);
@@ -118,7 +132,7 @@ export function SettingsTab({ projects, onProjectUpdated, onOpenAuthModal }: Set
       setNewBranchInput("");
     } catch (err) {
       console.error("Failed to create branch:", err);
-      alert(`Gagal membuat branch: ${err instanceof Error ? err.message : String(err)}`);
+      setBranchError(err instanceof Error ? err.message : String(err));
     } finally {
       setIsCreatingBranch(false);
     }
@@ -130,6 +144,7 @@ export function SettingsTab({ projects, onProjectUpdated, onOpenAuthModal }: Set
 
     setIsSaving(true);
     setSaveSuccess(false);
+    setSaveError(null);
 
     try {
       const updated = await updateProject(activeProject.id, {
@@ -151,7 +166,7 @@ export function SettingsTab({ projects, onProjectUpdated, onOpenAuthModal }: Set
       setTimeout(() => setSaveSuccess(false), 3500);
     } catch (err) {
       console.error("Failed to save project settings:", err);
-      alert(`Gagal menyimpan pengaturan: ${err instanceof Error ? err.message : String(err)}`);
+      setSaveError(err instanceof Error ? err.message : String(err));
     } finally {
       setIsSaving(false);
     }
@@ -492,6 +507,10 @@ export function SettingsTab({ projects, onProjectUpdated, onOpenAuthModal }: Set
                 <span className="text-[#4CB782] font-semibold flex items-center gap-1.5 animate-in fade-in">
                   <CheckCircle2 className="w-4 h-4" /> Pengaturan repository berhasil disimpan!
                 </span>
+              ) : saveError ? (
+                <span className="text-[#E0594A] font-semibold flex items-center gap-1.5 animate-in fade-in">
+                  <AlertCircle className="w-4 h-4" /> {saveError}
+                </span>
               ) : (
                 <span>Pengaturan akan langsung diterapkan pada eksekusi agen berikutnya.</span>
               )}
@@ -586,22 +605,33 @@ export function SettingsTab({ projects, onProjectUpdated, onOpenAuthModal }: Set
           onClick={() => setShowCreateBranchModal(false)}
         >
           <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="create-branch-modal-title"
             className="bg-[#1A1D28] border border-[#2B2F3D] rounded-[12px] p-6 max-w-md w-full shadow-2xl space-y-4"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between border-b border-[#2B2F3D] pb-3">
               <div className="flex items-center gap-2">
                 <GitBranch className="w-5 h-5 text-[#4CB782]" />
-                <h3 className="font-bold text-sm text-[#E7E9F2]">Create New Git Branch</h3>
+                <h3 id="create-branch-modal-title" className="font-bold text-sm text-[#E7E9F2]">Create New Git Branch</h3>
               </div>
               <button
                 type="button"
                 onClick={() => setShowCreateBranchModal(false)}
+                aria-label="Tutup dialog buat branch"
                 className="p-1 rounded hover:bg-[#242838] text-[#8D91A6] hover:text-[#E7E9F2] cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
+
+            {branchError && (
+              <div className="p-3 bg-[#2E181B] border border-[#E0594A]/40 rounded-lg text-xs text-[#E0594A] flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{branchError}</span>
+              </div>
+            )}
 
             <p className="text-xs text-[#8D91A6]">
               Cabang baru akan langsung dibuat di remote repository ({activeProject?.repository_full_name}).

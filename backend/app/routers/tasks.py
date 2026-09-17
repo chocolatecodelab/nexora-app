@@ -23,7 +23,8 @@ import logging
 import re
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+from fastapi.responses import StreamingResponse
 
 import difflib
 from app.config import get_settings
@@ -42,10 +43,12 @@ from app.models.schemas import (
     TaskResponse,
     TaskSummary,
     ToolCallResponse,
+    TaskFullDetails,
 )
 from app.services import (
     coder_service,
     debugger_service,
+    event_stream,
     gemini_service,
     git_provider,
     sandbox_service,
@@ -144,6 +147,7 @@ def _check_intervention(task_id: str) -> Optional[dict]:
 # Task CRUD
 # ============================================================
 
+@router.post("", response_model=TaskResponse, status_code=201)
 @router.post("/", response_model=TaskResponse, status_code=201)
 async def create_task(body: TaskCreate, background_tasks: BackgroundTasks):
     """
@@ -153,11 +157,15 @@ async def create_task(body: TaskCreate, background_tasks: BackgroundTasks):
     data = body.model_dump()
     task = supabase_client.create_task(data)
 
+    # Broadcast queued event to SSE listeners
+    event_stream.broadcast_task_event(task["id"], "status", {"status": "queued", "task": task})
+
     # Launch background agent pipeline
     background_tasks.add_task(run_agent_pipeline, task["id"])
     return task
 
 
+@router.get("", response_model=list[TaskSummary])
 @router.get("/", response_model=list[TaskSummary])
 async def list_tasks(project_id: Optional[str] = None):
     """List all tasks, optionally filtered by project."""
@@ -175,19 +183,12 @@ async def delete_task(task_id: str):
     return {"message": f"Task {task_id} deleted successfully"}
 
 
+@router.delete("")
 @router.delete("/")
 async def clear_task_history(project_id: Optional[str] = None):
-    """Clear all finished/stale tasks from history."""
-    client = supabase_client._get_supabase()
-    if client:
-        try:
-            if project_id:
-                client.table("tasks").delete().eq("project_id", project_id).execute()
-            else:
-                client.table("tasks").delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
-        except Exception as exc:
-            logger.warning("Supabase clear tasks error: %s", exc)
-    return {"message": "All task history cleared"}
+    """Clear all finished/stale tasks from history cascading to child tables and memory store."""
+    deleted_count = supabase_client.clear_task_history(project_id)
+    return {"message": "All task history cleared", "deleted_count": deleted_count}
 
 
 @router.get("/{task_id}", response_model=TaskResponse)
@@ -223,6 +224,53 @@ async def get_task(task_id: str):
     return task
 
 
+@router.get("/{task_id}/full", response_model=TaskFullDetails)
+async def get_task_full_details(task_id: str):
+    """
+    High-performance aggregated endpoint.
+    Returns task, runs, all tool calls per run, and comments in a single round-trip,
+    eliminating the N+1 polling and waterfall overhead.
+    """
+    task = supabase_client.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    runs = supabase_client.list_agent_runs(task_id)
+    tool_calls_map = {}
+    for run in runs:
+        tool_calls_map[run["id"]] = supabase_client.list_tool_calls(run["id"])
+
+    comments = supabase_client.list_task_comments(task_id)
+
+    return {
+        "task": task,
+        "runs": runs,
+        "tool_calls": tool_calls_map,
+        "comments": comments,
+    }
+
+
+@router.get("/{task_id}/stream")
+async def stream_task_events(task_id: str, request: Request):
+    """
+    Server-Sent Events (SSE) live event stream for a specific task.
+    Streams real-time status transitions, agent runs, tool calls, and test outputs.
+    """
+    task = supabase_client.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    return StreamingResponse(
+        event_stream.event_generator(task_id, request),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 # ============================================================
 # Human Approval Gate (PRD Section 5.1 & 7.5)
 # ============================================================
@@ -250,6 +298,7 @@ async def approve_task(task_id: str, background_tasks: BackgroundTasks):
 
     # Update task status to implementing
     supabase_client.update_task(task_id, {"status": "implementing"})
+    event_stream.broadcast_task_event(task_id, "status", {"status": "implementing"})
 
     # Launch coding + testing execution phase in background
     background_tasks.add_task(run_coding_phase, task_id)
@@ -279,6 +328,7 @@ async def reject_task(task_id: str, body: ApprovalCreate, background_tasks: Back
     })
 
     supabase_client.update_task(task_id, {"status": "planning"})
+    event_stream.broadcast_task_event(task_id, "status", {"status": "planning", "feedback": body.feedback_text})
 
     # Re-run planning with feedback
     background_tasks.add_task(
@@ -310,6 +360,7 @@ async def cancel_task(task_id: str):
         )
 
     supabase_client.update_task(task_id, {"status": "cancelled"})
+    event_stream.broadcast_task_event(task_id, "status", {"status": "cancelled"})
 
     # Cancel all running agent runs
     runs = supabase_client.list_agent_runs(task_id)
@@ -343,6 +394,7 @@ async def restart_task(task_id: str, background_tasks: BackgroundTasks):
         "error_message": None,
         "iteration_count": 0,
     })
+    event_stream.broadcast_task_event(task_id, "status", {"status": "queued"})
 
     # Re-launch pipeline
     background_tasks.add_task(run_agent_pipeline, task_id)
@@ -405,6 +457,10 @@ async def close_task_pr(task_id: str):
         project=project,
     )
 
+    if success:
+        supabase_client.update_task(task_id, {"status": "pr_closed"})
+        event_stream.broadcast_task_event(task_id, "status", {"status": "pr_closed"})
+
     return {"status": "pr_closed" if success else "failed", "task_id": task_id}
 
 
@@ -439,6 +495,7 @@ async def merge_task_pr(task_id: str):
         supabase_client.update_task(task_id, {
             "status": "merged",
         })
+        event_stream.broadcast_task_event(task_id, "status", {"status": "merged", "sha": merge_res.get("sha")})
         logger.info("Task %s PR #%d successfully merged on %s", task_id, pr_num, repo_name)
         return {
             "status": "merged",
@@ -679,6 +736,7 @@ async def run_agent_pipeline(task_id: str):
             return
 
         supabase_client.update_task(task_id, {"status": "analyzing_issue"})
+        event_stream.broadcast_task_event(task_id, "status", {"status": "analyzing_issue"})
         task = supabase_client.get_task(task_id)
         if not task:
             return
@@ -696,10 +754,15 @@ async def run_agent_pipeline(task_id: str):
                 "status": "needs_human_help",
                 "error_message": f"Human intervention: {intervention['comment_text']}",
             })
+            event_stream.broadcast_task_event(task_id, "status", {
+                "status": "needs_human_help",
+                "error_message": f"Human intervention: {intervention['comment_text']}",
+            })
             return
 
         # Phase 2: Analyzing repository (Selective Understanding & Targeted Scoping)
         supabase_client.update_task(task_id, {"status": "analyzing_repo"})
+        event_stream.broadcast_task_event(task_id, "status", {"status": "analyzing_repo"})
         project = supabase_client.get_project(task["project_id"])
         repo_context = ""
         if project:
@@ -754,6 +817,10 @@ async def run_agent_pipeline(task_id: str):
             "status": "failed",
             "error_message": str(exc),
         })
+        event_stream.broadcast_task_event(task_id, "status", {
+            "status": "failed",
+            "error_message": str(exc),
+        })
 
 
 async def run_planning_phase(
@@ -766,6 +833,7 @@ async def run_planning_phase(
         return
 
     supabase_client.update_task(task_id, {"status": "planning"})
+    event_stream.broadcast_task_event(task_id, "status", {"status": "planning"})
     task = supabase_client.get_task(task_id)
     if not task:
         return
@@ -800,6 +868,10 @@ async def run_planning_phase(
                 "status": "completed",
                 "completed_at": supabase_client._now_iso(),
             })
+            event_stream.broadcast_task_event(task_id, "plan_ready", {
+                "status": "awaiting_approval",
+                "plan": plan.model_dump(),
+            })
             logger.info("Plan generated for task %s — awaiting human approval", task_id)
         else:
             supabase_client.update_task(task_id, {
@@ -810,6 +882,10 @@ async def run_planning_phase(
                 "status": "failed",
                 "error_message": "Plan generation returned None",
             })
+            event_stream.broadcast_task_event(task_id, "status", {
+                "status": "failed",
+                "error_message": "Planning agent failed to generate a plan",
+            })
 
     except Exception as exc:
         logger.error("Planning phase failed: %s", exc)
@@ -818,6 +894,10 @@ async def run_planning_phase(
             "error_message": str(exc),
         })
         supabase_client.update_agent_run(run["id"], {
+            "status": "failed",
+            "error_message": str(exc),
+        })
+        event_stream.broadcast_task_event(task_id, "status", {
             "status": "failed",
             "error_message": str(exc),
         })
@@ -857,6 +937,7 @@ async def run_coding_phase(task_id: str):
     # Step 1: Coding Agent
     # ------------------------------------------------------------
     supabase_client.update_task(task_id, {"status": "implementing"})
+    event_stream.broadcast_task_event(task_id, "status", {"status": "implementing"})
     coder_run = supabase_client.create_agent_run({
         "task_id": task_id,
         "agent_type": "coder",
@@ -895,6 +976,11 @@ async def run_coding_phase(task_id: str):
         "code_changes": code_changes,
         "security_report": security_report.model_dump(),
     })
+    event_stream.broadcast_task_event(task_id, "code_ready", {
+        "status": "implementing",
+        "modified_count": len(code_changes.get("modified_files", [])),
+        "created_count": len(code_changes.get("created_files", [])),
+    })
 
     if not security_report.passed:
         logger.warning("Task %s pre-flight security guardrail alert: %s", task_id, security_report.summary)
@@ -924,12 +1010,20 @@ async def run_coding_phase(task_id: str):
                 "status": "needs_human_help",
                 "error_message": f"Human intervention: {intervention['comment_text']}",
             })
+            event_stream.broadcast_task_event(task_id, "status", {
+                "status": "needs_human_help",
+                "error_message": f"Human intervention: {intervention['comment_text']}",
+            })
             return
 
         # Testing
         supabase_client.update_task(task_id, {
             "status": "testing",
             "iteration_count": iteration,
+        })
+        event_stream.broadcast_task_event(task_id, "status", {
+            "status": "testing",
+            "iteration": iteration,
         })
         tester_run = supabase_client.create_agent_run({
             "task_id": task_id,
@@ -947,6 +1041,13 @@ async def run_coding_phase(task_id: str):
             "status": "completed" if test_result.passed else "failed",
             "completed_at": supabase_client._now_iso(),
         })
+        event_stream.broadcast_task_event(task_id, "test_result", {
+            "iteration": iteration,
+            "passed": test_result.passed,
+            "exit_code": test_result.exit_code,
+            "tests_passed": test_result.tests_passed,
+            "tests_failed": test_result.tests_failed,
+        })
 
         if test_result.passed:
             all_tests_passed = True
@@ -958,6 +1059,10 @@ async def run_coding_phase(task_id: str):
                 return
 
             supabase_client.update_task(task_id, {"status": "debugging"})
+            event_stream.broadcast_task_event(task_id, "status", {
+                "status": "debugging",
+                "iteration": iteration,
+            })
             debugger_run = supabase_client.create_agent_run({
                 "task_id": task_id,
                 "agent_type": "debugger",
@@ -969,12 +1074,53 @@ async def run_coding_phase(task_id: str):
             for f in code_changes.get("created_files", []):
                 current_files[f["path"]] = f["content"]
 
-            await debugger_service.diagnose_and_fix(
+            debug_fix = await debugger_service.diagnose_and_fix(
                 task_id=task_id,
                 run_id=debugger_run["id"],
                 test_output=test_result.output,
                 current_files=current_files,
             )
+
+            # Synchronize debugger patched files into code_changes
+            patched_files = debug_fix.get("patched_files", [])
+            if patched_files:
+                modified_map = {f["path"]: f for f in code_changes.get("modified_files", [])}
+                created_map = {f["path"]: f for f in code_changes.get("created_files", [])}
+
+                for pf in patched_files:
+                    path = pf["path"]
+                    if path in modified_map:
+                        modified_map[path]["content"] = pf["content"]
+                        if "diff_blocks" in pf:
+                            modified_map[path]["diff_blocks"] = pf["diff_blocks"]
+                    elif path in created_map:
+                        created_map[path]["content"] = pf["content"]
+                    else:
+                        modified_map[path] = {
+                            "path": path,
+                            "content": pf["content"],
+                            "diff_blocks": pf.get("diff_blocks", []),
+                        }
+
+                code_changes["modified_files"] = list(modified_map.values())
+                code_changes["created_files"] = list(created_map.values())
+
+                # Re-scan security guardrail on patched code
+                security_report = security_service.scan_code_changes(code_changes)
+
+                # Persist updated code_changes to database
+                supabase_client.update_task(task_id, {
+                    "code_changes": code_changes,
+                    "security_report": security_report.model_dump(),
+                })
+
+                # Broadcast live code_ready event
+                event_stream.broadcast_task_event(task_id, "code_ready", {
+                    "status": "debugging",
+                    "iteration": iteration,
+                    "modified_count": len(code_changes.get("modified_files", [])),
+                    "created_count": len(code_changes.get("created_files", [])),
+                })
 
             supabase_client.update_agent_run(debugger_run["id"], {
                 "status": "completed",
@@ -991,6 +1137,7 @@ async def run_coding_phase(task_id: str):
 
     if all_tests_passed:
         supabase_client.update_task(task_id, {"status": "pr_creating"})
+        event_stream.broadcast_task_event(task_id, "status", {"status": "pr_creating"})
         await asyncio.sleep(1.2)
 
         # Dynamic Branch Naming & Base Branch
@@ -1049,10 +1196,19 @@ async def run_coding_phase(task_id: str):
             "branch_name": branch_name,
             "pr_url": pr_url,
         })
+        event_stream.broadcast_task_event(task_id, "pr_created", {
+            "status": "pr_created",
+            "branch_name": branch_name,
+            "pr_url": pr_url,
+        })
         logger.info("PR/MR created for task %s: %s (%s)", task_id, pr_url, branch_name)
 
     else:
         supabase_client.update_task(task_id, {
+            "status": "needs_human_help",
+            "error_message": f"Agent stopped after {max_iterations} attempts. Automated tests did not achieve 100% pass rate.",
+        })
+        event_stream.broadcast_task_event(task_id, "status", {
             "status": "needs_human_help",
             "error_message": f"Agent stopped after {max_iterations} attempts. Automated tests did not achieve 100% pass rate.",
         })

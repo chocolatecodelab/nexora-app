@@ -10,8 +10,9 @@ import {
   GitBranch,
   Cpu,
   Database,
-  Sparkles,
+  Bot,
   GitMerge,
+  X,
 } from "lucide-react";
 import { ServiceStatus } from "@/types";
 
@@ -23,6 +24,8 @@ interface SidebarProps {
   serviceStatus: ServiceStatus;
   apiConnected: boolean;
   activeTasksCount?: number;
+  isOpen?: boolean;
+  onClose?: () => void;
 }
 
 export function Sidebar({
@@ -31,6 +34,8 @@ export function Sidebar({
   serviceStatus,
   apiConnected,
   activeTasksCount = 0,
+  isOpen = false,
+  onClose,
 }: SidebarProps) {
   const navItems: { id: NavTab; label: string; icon: React.ElementType; count?: number }[] = [
     { id: "dashboard", label: "Agent Workspace", icon: LayoutDashboard },
@@ -40,11 +45,11 @@ export function Sidebar({
     { id: "settings", label: "Settings & Auth", icon: SettingsIcon },
   ];
 
-  return (
-    <aside className="w-64 shrink-0 bg-[#1A1D28] border-r border-[#2B2F3D] flex flex-col justify-between min-h-screen">
+  const renderContent = (isMobile: boolean = false) => (
+    <div className="flex flex-col justify-between h-full min-h-screen">
       {/* Brand Header */}
       <div>
-        <div className="px-6 py-5 border-b border-[#2B2F3D]">
+        <div className="px-6 py-5 border-b border-[#2B2F3D] flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-lg bg-[#242838] border border-[#3A3F52] flex items-center justify-center text-[#4CB782]">
               <GitBranch className="w-4 h-4" />
@@ -58,6 +63,16 @@ export function Sidebar({
               </p>
             </div>
           </div>
+
+          {isMobile && onClose && (
+            <button
+              onClick={onClose}
+              className="p-1.5 rounded-lg text-[#8D91A6] hover:text-[#E7E9F2] hover:bg-[#242838] transition cursor-pointer md:hidden"
+              aria-label="Tutup navigasi"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          )}
         </div>
 
         {/* Navigation List */}
@@ -72,7 +87,10 @@ export function Sidebar({
             return (
               <button
                 key={item.id}
-                onClick={() => onSelectTab(item.id)}
+                onClick={() => {
+                  onSelectTab(item.id);
+                  if (isMobile && onClose) onClose();
+                }}
                 className={`w-full flex items-center justify-between px-3 py-2.5 rounded-md text-xs font-medium transition cursor-pointer ${
                   isActive
                     ? "bg-[#242838] text-[#E7E9F2] border-l-2 border-[#6C9BFF]"
@@ -143,7 +161,7 @@ export function Sidebar({
           {/* Gemini AI */}
           <div className="flex items-center justify-between text-[11px]">
             <span className="flex items-center gap-1.5 text-[#8D91A6]">
-              <Sparkles className="w-3.5 h-3.5 text-[#5E6275]" /> Gemini 3.5 Flash
+              <Bot className="w-3.5 h-3.5 text-[#5E6275]" /> Gemini 3.5 Flash
             </span>
             <span
               className={`font-mono text-[10px] flex items-center gap-1 ${
@@ -164,13 +182,46 @@ export function Sidebar({
             <span className="flex items-center gap-1.5 text-[#8D91A6]">
               <GitMerge className="w-3.5 h-3.5 text-[#5E6275]" /> GitHub / GitLab
             </span>
-            <span className="font-mono text-[10px] flex items-center gap-1 text-[#4CB782]">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#4CB782]" />
-              ready
+            <span
+              className={`font-mono text-[10px] flex items-center gap-1 ${
+                serviceStatus.github ? "text-[#4CB782]" : "text-[#5E6275]"
+              }`}
+            >
+              <span
+                className={`w-1.5 h-1.5 rounded-full ${
+                  serviceStatus.github ? "bg-[#4CB782]" : "bg-[#5E6275]"
+                }`}
+              />
+              {serviceStatus.github ? "ready" : "unconfigured"}
             </span>
           </div>
         </div>
       </div>
-    </aside>
+    </div>
+  );
+
+  return (
+    <>
+      {/* Desktop Persistent Sidebar */}
+      <aside className="hidden md:flex w-64 shrink-0 bg-[#1A1D28] border-r border-[#2B2F3D] flex-col justify-between min-h-screen sticky top-0 h-screen z-30">
+        {renderContent(false)}
+      </aside>
+
+      {/* Mobile Drawer Navigation */}
+      {isOpen && (
+        <div className="fixed inset-0 z-50 md:hidden flex">
+          {/* Backdrop */}
+          <div
+            className="fixed inset-0 bg-black/70 backdrop-blur-sm transition-opacity animate-in fade-in duration-200"
+            onClick={onClose}
+          />
+
+          {/* Drawer Body */}
+          <aside className="relative z-50 w-72 bg-[#1A1D28] border-r border-[#2B2F3D] flex flex-col justify-between h-full shadow-2xl animate-in slide-in-from-left duration-200">
+            {renderContent(true)}
+          </aside>
+        </div>
+      )}
+    </>
   );
 }

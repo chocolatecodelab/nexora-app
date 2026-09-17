@@ -15,7 +15,6 @@ import {
   Plus,
   Minus,
   FileCheck2,
-  Sparkles,
   ShieldAlert,
 } from "lucide-react";
 
@@ -59,14 +58,46 @@ export function CodeDiffViewer({ taskId }: CodeDiffViewerProps) {
     return diffData.files.find((f) => f.path === selectedFilePath) || diffData.files[0];
   }, [diffData, selectedFilePath]);
 
-  const handleCopyNewContent = () => {
-    if (!activeFile) return;
-    navigator.clipboard.writeText(activeFile.new_content);
-    setCopiedType("file");
-    setTimeout(() => setCopiedType(null), 2000);
+  const safeCopy = async (text: string): Promise<boolean> => {
+    try {
+      if (typeof window !== "undefined" && navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+    } catch (err) {
+      console.warn("navigator.clipboard failed, attempting fallback:", err);
+    }
+
+    try {
+      if (typeof document !== "undefined") {
+        const textArea = document.createElement("textarea");
+        textArea.value = text;
+        textArea.style.position = "fixed";
+        textArea.style.left = "-999999px";
+        textArea.style.top = "-999999px";
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        const success = document.execCommand("copy");
+        textArea.remove();
+        return success;
+      }
+    } catch (fallbackErr) {
+      console.error("Fallback clipboard copy failed:", fallbackErr);
+    }
+    return false;
   };
 
-  const handleCopyRawPatch = () => {
+  const handleCopyNewContent = async () => {
+    if (!activeFile) return;
+    const ok = await safeCopy(activeFile.new_content);
+    if (ok) {
+      setCopiedType("file");
+      setTimeout(() => setCopiedType(null), 2000);
+    }
+  };
+
+  const handleCopyRawPatch = async () => {
     if (!activeFile) return;
     const patch = activeFile.diff_lines
       .map((l) => {
@@ -74,9 +105,11 @@ export function CodeDiffViewer({ taskId }: CodeDiffViewerProps) {
         return `${prefix}${l.content}`;
       })
       .join("\n");
-    navigator.clipboard.writeText(patch);
-    setCopiedType("patch");
-    setTimeout(() => setCopiedType(null), 2000);
+    const ok = await safeCopy(patch);
+    if (ok) {
+      setCopiedType("patch");
+      setTimeout(() => setCopiedType(null), 2000);
+    }
   };
 
   // Build paired rows for Side-by-Side (Split) View
@@ -297,7 +330,7 @@ export function CodeDiffViewer({ taskId }: CodeDiffViewerProps) {
 
           {activeFile && viewMode === "split" ? (
             /* SIDE-BY-SIDE (SPLIT) VIEW */
-            <div className="grid grid-cols-2 divide-x divide-[#2B2F3D]">
+            <div className="grid grid-cols-2 divide-x divide-[#2B2F3D] min-w-[600px]">
               {/* Left Column (Original) */}
               <div>
                 <div className="px-3 py-1.5 bg-[#12141C]/80 border-b border-[#2B2F3D] text-[10px] font-bold text-[#8D91A6] uppercase tracking-wider">

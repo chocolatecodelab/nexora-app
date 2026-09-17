@@ -22,6 +22,8 @@ import { CommitHistoryTab } from "@/components/CommitHistoryTab";
 import { CodeDiffViewer } from "@/components/CodeDiffViewer";
 import { SecurityGuardrailCard } from "@/components/SecurityGuardrailCard";
 import { AuthAccountModal } from "@/components/AuthAccountModal";
+import { ConfirmModal } from "@/components/ConfirmModal";
+import { Toast, ToastMessage, ToastType } from "@/components/Toast";
 import {
   checkHealth,
   getServiceStatus,
@@ -51,6 +53,8 @@ import {
   getTaskComments,
   getTaskRuns,
   getRunToolCalls,
+  getTaskStreamUrl,
+  getTaskFull,
 } from "@/lib/api";
 import {
   AuthStatusResponse,
@@ -72,7 +76,6 @@ import {
   Clock,
   Tag,
   CheckCircle2,
-  Sparkles,
   Ban,
   RotateCcw,
   MessageSquare,
@@ -94,10 +97,12 @@ import {
   UploadCloud,
   File as FileIcon,
   Trash2,
+  Menu,
 } from "lucide-react";
 
 export default function Home() {
   const [currentTab, setCurrentTab] = useState<NavTab>("dashboard");
+  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const [apiConnected, setApiConnected] = useState(false);
   const [serviceStatus, setServiceStatus] = useState<ServiceStatus>({
     supabase: false,
@@ -168,6 +173,42 @@ export default function Home() {
   const [isClearingTasks, setIsClearingTasks] = useState(false);
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
 
+  // Modern UI Feedback: Non-blocking Toast & Confirmation Modal
+  const [toast, setToast] = useState<ToastMessage | null>(null);
+  const showToast = useCallback((type: ToastType, message: string) => {
+    setToast({ id: String(Date.now()), type, message });
+  }, []);
+
+  const [confirmState, setConfirmState] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    confirmLabel?: string;
+    cancelLabel?: string;
+    isDestructive?: boolean;
+    onConfirm: () => void;
+  } | null>(null);
+
+  const requestConfirm = (
+    title: string,
+    message: string,
+    onConfirm: () => void,
+    options?: { confirmLabel?: string; cancelLabel?: string; isDestructive?: boolean }
+  ) => {
+    setConfirmState({
+      isOpen: true,
+      title,
+      message,
+      confirmLabel: options?.confirmLabel,
+      cancelLabel: options?.cancelLabel,
+      isDestructive: options?.isDestructive,
+      onConfirm: () => {
+        setConfirmState(null);
+        onConfirm();
+      },
+    });
+  };
+
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // 1. Initial Load & Background Reconnect Poll
@@ -207,29 +248,9 @@ export default function Home() {
         console.error("Failed to load projects:", err);
       }
 
-      // Fetch Auth Status (with seamless session storage re-hydration if available)
+      // Fetch Auth Status from backend
       try {
-        let auth = await getAuthStatus();
-        if (!auth.github.connected && !auth.gitlab.connected && typeof window !== "undefined") {
-          const savedGh = sessionStorage.getItem("nexora_gh_token");
-          const savedGl = sessionStorage.getItem("nexora_gl_token");
-          const savedGlUrl = sessionStorage.getItem("nexora_gl_url");
-          if (savedGh) {
-            try {
-              await connectGitToken({ provider: "github", token: savedGh });
-              auth = await getAuthStatus();
-            } catch {
-              sessionStorage.removeItem("nexora_gh_token");
-            }
-          } else if (savedGl) {
-            try {
-              await connectGitToken({ provider: "gitlab", token: savedGl, gitlab_url: savedGlUrl || undefined });
-              auth = await getAuthStatus();
-            } catch {
-              sessionStorage.removeItem("nexora_gl_token");
-            }
-          }
-        }
+        const auth = await getAuthStatus();
         setAuthStatus(auth);
       } catch (err) {
         console.error("Failed to load auth status:", err);
@@ -291,35 +312,52 @@ export default function Home() {
   };
 
   // Handler to delete a single task from history
-  const handleDeleteTask = async (taskId: string, e?: React.MouseEvent) => {
+  const handleDeleteTask = (taskId: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
-    setDeletingTaskId(taskId);
-    try {
-      await deleteTask(taskId);
-      setAllTasks((prev) => prev.filter((t) => t.id !== taskId));
-      if (activeTask?.id === taskId) {
-        setActiveTask(null);
-      }
-    } catch (err) {
-      console.error("Failed to delete task:", err);
-    } finally {
-      setDeletingTaskId(null);
-    }
+    requestConfirm(
+      "Hapus Task",
+      "Yakin ingin menghapus task ini dari riwayat?",
+      async () => {
+        setDeletingTaskId(taskId);
+        try {
+          await deleteTask(taskId);
+          setAllTasks((prev) => prev.filter((t) => t.id !== taskId));
+          if (activeTask?.id === taskId) {
+            setActiveTask(null);
+          }
+          showToast("info", "Task berhasil dihapus dari riwayat.");
+        } catch (err) {
+          console.error("Failed to delete task:", err);
+          showToast("error", `Gagal menghapus task: ${err instanceof Error ? err.message : String(err)}`);
+        } finally {
+          setDeletingTaskId(null);
+        }
+      },
+      { confirmLabel: "Hapus Task", isDestructive: true }
+    );
   };
 
   // Handler to clear all task history
-  const handleClearTaskHistory = async () => {
-    if (!window.confirm("Yakin ingin menghapus semua riwayat task?")) return;
-    setIsClearingTasks(true);
-    try {
-      await clearTaskHistory();
-      setAllTasks([]);
-      setActiveTask(null);
-    } catch (err) {
-      console.error("Failed to clear task history:", err);
-    } finally {
-      setIsClearingTasks(false);
-    }
+  const handleClearTaskHistory = () => {
+    requestConfirm(
+      "Hapus Seluruh Riwayat Task",
+      "Apakah Anda yakin ingin membersihkan semua riwayat task, log eksekusi, dan rekaman agen dari database?",
+      async () => {
+        setIsClearingTasks(true);
+        try {
+          await clearTaskHistory();
+          setAllTasks([]);
+          setActiveTask(null);
+          showToast("success", "Semua riwayat task berhasil dibersihkan!");
+        } catch (err) {
+          console.error("Failed to clear task history:", err);
+          showToast("error", `Gagal membersihkan riwayat task: ${err instanceof Error ? err.message : String(err)}`);
+        } finally {
+          setIsClearingTasks(false);
+        }
+      },
+      { confirmLabel: "Hapus Semua", isDestructive: true }
+    );
   };
 
   // 2. Fetch issues, project files & remote branches when selected repository changes
@@ -395,38 +433,131 @@ export default function Home() {
     loadDiscovery();
   }, [showConnectModal, connectProvider]);
 
-  // 3. Polling active task details, observability logs & human comments
+  // 3. Fast single-request fetching for task details, observability logs & human comments
   const fetchTaskDetails = useCallback(async (taskId: string) => {
     try {
-      const task = await getTask(taskId);
-      setActiveTask(task);
+      const full = await getTaskFull(taskId);
+      setActiveTask(full.task);
 
       // Update in allTasks list
       setAllTasks((prev) =>
-        prev.map((t) => (t.id === task.id ? { ...t, ...task } : t))
+        prev.map((t) => (t.id === full.task.id ? { ...t, ...full.task } : t))
       );
 
-      // Fetch runs
-      const runs = await getTaskRuns(taskId);
-      setAgentRuns(runs);
-
-      // Fetch tool calls for each run
-      const tcMap: Record<string, ToolCall[]> = {};
-      for (const run of runs) {
-        const tcs = await getRunToolCalls(taskId, run.id);
-        tcMap[run.id] = tcs;
-      }
-      setToolCalls(tcMap);
-
-      // Fetch review comments
-      const comments = await getTaskComments(taskId);
-      setTaskComments(comments);
+      setAgentRuns(full.runs || []);
+      setToolCalls(full.tool_calls || {});
+      setTaskComments(full.comments || []);
     } catch (err) {
-      console.error("Polling error:", err);
+      console.error("Task details fetch error:", err);
     }
   }, []);
 
-  // Smart Adaptive Polling for active task updates
+  // 3b. SSE Real-Time Event Streaming
+  const [isSseConnected, setIsSseConnected] = useState(false);
+
+  useEffect(() => {
+    if (!activeTask?.id) {
+      setIsSseConnected(false);
+      return;
+    }
+
+    const isProcessing = [
+      "queued",
+      "analyzing_issue",
+      "analyzing_repo",
+      "planning",
+      "implementing",
+      "testing",
+      "debugging",
+      "pr_creating",
+    ].includes(activeTask.status);
+
+    if (!isProcessing) {
+      setIsSseConnected(false);
+      return;
+    }
+
+    const streamUrl = getTaskStreamUrl(activeTask.id);
+    const es = new EventSource(streamUrl);
+
+    es.onopen = () => {
+      setIsSseConnected(true);
+    };
+
+    es.addEventListener("init", (e: MessageEvent) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (data && data.task_id === activeTask.id) {
+          setActiveTask((prev) => (prev ? { ...prev, ...data } : prev));
+          setAllTasks((prev) =>
+            prev.map((t) => (t.id === activeTask.id ? { ...t, ...data } : t))
+          );
+        }
+      } catch (err) {
+        console.error("SSE init parse error:", err);
+      }
+    });
+
+    es.addEventListener("status", (e: MessageEvent) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (data) {
+          setActiveTask((prev) => (prev ? { ...prev, ...data } : prev));
+          setAllTasks((prev) =>
+            prev.map((t) => (t.id === activeTask.id ? { ...t, ...data } : t))
+          );
+          if (["awaiting_approval", "pr_created", "completed", "failed", "cancelled"].includes(data.status)) {
+            fetchTaskDetails(activeTask.id);
+          }
+        }
+      } catch (err) {
+        console.error("SSE status parse error:", err);
+      }
+    });
+
+    es.addEventListener("plan_ready", (e: MessageEvent) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (data?.plan) {
+          setActiveTask((prev) => (prev ? { ...prev, plan: data.plan } : prev));
+        }
+        fetchTaskDetails(activeTask.id);
+      } catch (err) {
+        console.error("SSE plan_ready parse error:", err);
+      }
+    });
+
+    es.addEventListener("tool_call", () => {
+      fetchTaskDetails(activeTask.id);
+    });
+
+    es.addEventListener("terminal_output", () => {
+      fetchTaskDetails(activeTask.id);
+    });
+
+    es.addEventListener("pr_created", (e: MessageEvent) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (data) {
+          setActiveTask((prev) => (prev ? { ...prev, ...data, status: "pr_created" } : prev));
+        }
+        fetchTaskDetails(activeTask.id);
+      } catch (err) {
+        console.error("SSE pr_created error:", err);
+      }
+    });
+
+    es.onerror = () => {
+      setIsSseConnected(false);
+    };
+
+    return () => {
+      es.close();
+      setIsSseConnected(false);
+    };
+  }, [activeTask?.id, activeTask?.status, fetchTaskDetails]);
+
+  // Smart Adaptive Polling for active task updates (fallback / heartbeat)
   useEffect(() => {
     if (!activeTask?.id) return;
 
@@ -447,14 +578,16 @@ export default function Home() {
 
     if (!isProcessing) return;
 
+    // When SSE is connected, poll at a relaxed interval (6s); otherwise fallback to 2s
+    const pollInterval = isSseConnected ? 6000 : 2000;
     const intervalId = setInterval(() => {
       fetchTaskDetails(activeTask.id);
-    }, 2000);
+    }, pollInterval);
 
     return () => {
       clearInterval(intervalId);
     };
-  }, [activeTask?.id, activeTask?.status, fetchTaskDetails]);
+  }, [activeTask?.id, activeTask?.status, isSseConnected, fetchTaskDetails]);
 
   // Auto-focus to Code Diff tab once PR is created or merged (unless explicitly requested via URL)
   useEffect(() => {
@@ -472,7 +605,7 @@ export default function Home() {
     const fileArray = Array.from(files);
     fileArray.forEach((file) => {
       if (file.size > 10 * 1024 * 1024) {
-        alert(`File "${file.name}" melebihi batas ukuran 10MB.`);
+        showToast("error", `File "${file.name}" melebihi batas ukuran 10MB.`);
         return;
       }
       const reader = new FileReader();
@@ -539,119 +672,137 @@ export default function Home() {
       setActiveTask(task);
       setAllTasks((prev) => [task, ...prev]);
       setActiveTaskViewTab("plan");
+      showToast("success", `Agent berhasil dimulai untuk issue #${selectedIssue.number}!`);
     } catch (err) {
       console.error("Failed to start agent:", err);
-      alert(`Error starting agent: ${err instanceof Error ? err.message : String(err)}`);
+      showToast("error", `Gagal memulai agent: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setIsStartingAgent(false);
     }
   };
 
   // 5. Cancel Task Action
-  const handleCancelTask = async () => {
+  // 5. Cancel Task Action
+  const handleCancelTask = () => {
     if (!activeTask) return;
-    if (!confirm("Yakin ingin membatalkan (cancel) eksekusi agent ini?")) return;
-    setIsCancelling(true);
-    try {
-      await cancelTask(activeTask.id);
-      fetchTaskDetails(activeTask.id);
-    } catch (err) {
-      console.error("Failed to cancel task:", err);
-    } finally {
-      setIsCancelling(false);
-    }
+    requestConfirm(
+      "Batalkan Eksekusi Agent",
+      "Apakah Anda yakin ingin membatalkan (cancel) eksekusi agent yang sedang berjalan?",
+      async () => {
+        setIsCancelling(true);
+        try {
+          await cancelTask(activeTask.id);
+          fetchTaskDetails(activeTask.id);
+          showToast("info", "Eksekusi agent berhasil dibatalkan.");
+        } catch (err) {
+          console.error("Failed to cancel task:", err);
+          showToast("error", `Gagal membatalkan task: ${err instanceof Error ? err.message : String(err)}`);
+        } finally {
+          setIsCancelling(false);
+        }
+      },
+      { confirmLabel: "Batalkan Eksekusi", isDestructive: true }
+    );
   };
 
   // 6. Restart Task Action
-  const handleRestartTask = async () => {
+  const handleRestartTask = () => {
     if (!activeTask) return;
-    if (!confirm("Restart task ini dari awal (planning ulang)?")) return;
-    setIsRestarting(true);
-    try {
-      const updated = await restartTask(activeTask.id);
-      setActiveTask(updated);
-      setActiveTaskViewTab("plan");
-    } catch (err) {
-      console.error("Failed to restart task:", err);
-    } finally {
-      setIsRestarting(false);
-    }
+    requestConfirm(
+      "Restart Task",
+      "Apakah Anda ingin memulai ulang task ini dari fase perumusan rencana (planning) awal?",
+      async () => {
+        setIsRestarting(true);
+        try {
+          const updated = await restartTask(activeTask.id);
+          setActiveTask(updated);
+          setActiveTaskViewTab("plan");
+          showToast("info", "Task berhasil di-restart ke fase planning.");
+        } catch (err) {
+          console.error("Failed to restart task:", err);
+          showToast("error", `Gagal me-restart task: ${err instanceof Error ? err.message : String(err)}`);
+        } finally {
+          setIsRestarting(false);
+        }
+      },
+      { confirmLabel: "Mulai Ulang", isDestructive: false }
+    );
   };
 
   // 6b. Revert PR Action
-  const handleRevertPR = async () => {
+  const handleRevertPR = () => {
     if (!activeTask) return;
-    if (
-      !confirm(
-        `Apakah Anda yakin ingin membuka Revert PR untuk membatalkan perubahan task #${activeTask.issue_number}?`
-      )
-    )
-      return;
-
-    setIsReverting(true);
-    setRevertResult(null);
-    try {
-      const res = await revertTaskPR(activeTask.id);
-      if (res.revert_pr_url) {
-        setRevertResult(res.revert_pr_url);
-      }
-      alert(`Revert PR berhasil dibuat di Git Provider!`);
-    } catch (err) {
-      console.error("Failed to create revert PR:", err);
-      alert(`Gagal membuat Revert PR: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setIsReverting(false);
-    }
+    requestConfirm(
+      "Buat Revert Pull Request",
+      `Apakah Anda yakin ingin membuka Revert PR untuk membatalkan perubahan task #${activeTask.issue_number}?`,
+      async () => {
+        setIsReverting(true);
+        setRevertResult(null);
+        try {
+          const res = await revertTaskPR(activeTask.id);
+          if (res.revert_pr_url) {
+            setRevertResult(res.revert_pr_url);
+          }
+          showToast("success", "Revert PR berhasil dibuat di Git Provider!");
+        } catch (err) {
+          console.error("Failed to create revert PR:", err);
+          showToast("error", `Gagal membuat Revert PR: ${err instanceof Error ? err.message : String(err)}`);
+        } finally {
+          setIsReverting(false);
+        }
+      },
+      { confirmLabel: "Buat Revert PR", isDestructive: true }
+    );
   };
 
   // 6c. Close / Discard PR Action
-  const handleClosePR = async () => {
+  const handleClosePR = () => {
     if (!activeTask) return;
-    if (
-      !confirm(
-        `Apakah Anda yakin ingin menutup / membatalkan PR untuk task #${activeTask.issue_number} tanpa merger?`
-      )
-    )
-      return;
-
-    setIsClosingPR(true);
-    try {
-      await closeTaskPR(activeTask.id);
-      alert(`PR untuk task #${activeTask.issue_number} berhasil ditutup di repository.`);
-      const updated = await getTask(activeTask.id);
-      setActiveTask(updated);
-    } catch (err) {
-      console.error("Failed to close PR:", err);
-      alert(`Gagal menutup PR: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setIsClosingPR(false);
-    }
+    requestConfirm(
+      "Tutup Pull Request",
+      `Apakah Anda yakin ingin menutup / membatalkan PR untuk task #${activeTask.issue_number} tanpa merger?`,
+      async () => {
+        setIsClosingPR(true);
+        try {
+          await closeTaskPR(activeTask.id);
+          showToast("info", `PR untuk task #${activeTask.issue_number} berhasil ditutup di repository.`);
+          const updated = await getTask(activeTask.id);
+          setActiveTask(updated);
+        } catch (err) {
+          console.error("Failed to close PR:", err);
+          showToast("error", `Gagal menutup PR: ${err instanceof Error ? err.message : String(err)}`);
+        } finally {
+          setIsClosingPR(false);
+        }
+      },
+      { confirmLabel: "Tutup PR", isDestructive: true }
+    );
   };
 
   // 6d. Direct 1-Click Merge PR to Default Branch (Clean Emerald CTA)
-  const handleMergePR = async () => {
+  const handleMergePR = () => {
     if (!activeTask) return;
     const targetBranch = selectedProject?.default_branch || "main";
-    if (
-      !confirm(
-        `Apakah Anda yakin ingin menggabungkan (Merge) Pull Request ini langsung ke branch '${targetBranch}'?`
-      )
-    )
-      return;
-
-    setIsMergingPR(true);
-    try {
-      const res = await mergeTaskPR(activeTask.id);
-      alert(`Pull Request berhasil dimerge ke branch '${targetBranch}'! ${res.message || ""}`);
-      const updated = await getTask(activeTask.id);
-      setActiveTask(updated);
-      fetchTaskDetails(activeTask.id);
-    } catch (err) {
-      console.error("Failed to merge PR:", err);
-      alert(`Gagal melakukan merge: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setIsMergingPR(false);
-    }
+    requestConfirm(
+      "Merge Pull Request",
+      `Apakah Anda yakin ingin menggabungkan (Merge) Pull Request ini langsung ke branch '${targetBranch}'?`,
+      async () => {
+        setIsMergingPR(true);
+        try {
+          const res = await mergeTaskPR(activeTask.id);
+          showToast("success", `Pull Request berhasil dimerge ke branch '${targetBranch}'! ${res.message || ""}`);
+          const updated = await getTask(activeTask.id);
+          setActiveTask(updated);
+          fetchTaskDetails(activeTask.id);
+        } catch (err) {
+          console.error("Failed to merge PR:", err);
+          showToast("error", `Gagal melakukan merge: ${err instanceof Error ? err.message : String(err)}`);
+        } finally {
+          setIsMergingPR(false);
+        }
+      },
+      { confirmLabel: "Merge Sekarang", isDestructive: false }
+    );
   };
 
   // 6e. Start New Task / Work on Another Issue
@@ -714,9 +865,10 @@ export default function Home() {
       setShowCustomIssueModal(false);
       setCustomIssueTitle("");
       setCustomIssueBody("");
+      showToast("success", `Issue #${newIss.number} berhasil dibuat di repository!`);
     } catch (err) {
       console.error("Failed to create remote issue:", err);
-      alert(`Gagal membuat issue di repository: ${err instanceof Error ? err.message : String(err)}`);
+      showToast("error", `Gagal membuat issue di repository: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setIsCreatingIssue(false);
     }
@@ -748,13 +900,15 @@ export default function Home() {
   );
 
   return (
-    <div className="min-h-screen bg-[#12141C] text-[#E7E9F2] flex font-sans">
+    <div className="min-h-screen bg-[#12141C] text-[#E7E9F2] flex flex-col md:flex-row font-sans">
       {/* Sidebar Navigation */}
       <Sidebar
         currentTab={currentTab}
         onSelectTab={setCurrentTab}
         serviceStatus={serviceStatus}
         apiConnected={apiConnected}
+        isOpen={isMobileNavOpen}
+        onClose={() => setIsMobileNavOpen(false)}
         activeTasksCount={allTasks.filter((t) => [
           "queued",
           "analyzing_issue",
@@ -768,10 +922,43 @@ export default function Home() {
         ].includes(t.status)).length}
       />
 
+      {/* Mobile Topbar */}
+      <div className="md:hidden px-4 py-3 bg-[#1A1D28] border-b border-[#2B2F3D] flex items-center justify-between sticky top-0 z-20 shrink-0">
+        <div className="flex items-center gap-2.5">
+          <button
+            onClick={() => setIsMobileNavOpen(true)}
+            className="p-1.5 rounded-lg text-[#8D91A6] hover:text-[#E7E9F2] hover:bg-[#242838] transition border border-[#2B2F3D] cursor-pointer"
+            aria-label="Buka navigasi"
+          >
+            <Menu className="w-5 h-5" />
+          </button>
+          <div className="flex items-center gap-2">
+            <div className="w-6 h-6 rounded bg-[#242838] border border-[#3A3F52] flex items-center justify-center text-[#4CB782]">
+              <GitBranch className="w-3.5 h-3.5" />
+            </div>
+            <span className="font-heading font-bold text-sm text-[#E7E9F2]">Nexora</span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowAuthModal(true)}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-mono border cursor-pointer ${
+              authStatus?.github.connected || authStatus?.gitlab.connected
+                ? "bg-[#1B2B23] border-[#4CB782]/40 text-[#4CB782]"
+                : "bg-[#2E260F] border-[#E3A73B]/50 text-[#E3A73B]"
+            }`}
+          >
+            <KeyRound className="w-3 h-3" />
+            <span>{authStatus?.github.connected || authStatus?.gitlab.connected ? "Auth OK" : "Auth"}</span>
+          </button>
+        </div>
+      </div>
+
       {/* Main Content Area */}
-      <main className="flex-1 min-w-0 flex flex-col h-screen overflow-y-auto">
+      <main className="flex-1 min-w-0 flex flex-col h-[calc(100vh-53px)] md:h-screen overflow-y-auto">
         {/* Top Header */}
-        <header className="px-8 py-4 border-b border-[#2B2F3D] bg-[#1A1D28] flex items-center justify-between shrink-0">
+        <header className="hidden md:flex px-8 py-4 border-b border-[#2B2F3D] bg-[#1A1D28] items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
             <span className="text-[11px] font-mono uppercase font-bold tracking-wider text-[#8D91A6]">
               Autonomous Software Engineering System
@@ -816,7 +1003,7 @@ export default function Home() {
         </header>
 
         {/* Dynamic Tab Views */}
-        <div className="p-8 flex-1">
+        <div className="p-4 md:p-8 flex-1">
           {/* ============================================================ */}
           {/* TAB 1: DASHBOARD                                             */}
           {/* ============================================================ */}
@@ -1100,7 +1287,7 @@ export default function Home() {
                         <div className="p-2.5 bg-[#1A1D28] rounded-[6px] border border-[#2B2F3D] space-y-2">
                           <div className="flex items-center justify-between text-[11px] font-mono text-[#8D91A6]">
                             <span className="flex items-center gap-1 text-[#E3A73B] font-bold">
-                              <Sparkles className="w-3 h-3 text-[#E3A73B]" />
+                              <Paperclip className="w-3 h-3 text-[#E3A73B]" />
                               Multimodal Attachments ({uploadedAttachments.length}):
                             </span>
                             <button
@@ -1477,6 +1664,9 @@ export default function Home() {
                         >
                           <Terminal className="w-3.5 h-3.5" />
                           <span>Live Tool Log & Audit Trail</span>
+                          {isSseConnected && (
+                            <span className="w-1.5 h-1.5 rounded-full bg-[#4CB782] animate-pulse ml-0.5" title="Live SSE Connected" />
+                          )}
                         </button>
 
                         <button
@@ -1518,7 +1708,7 @@ export default function Home() {
 
                     {/* View 4: Live Tool Calls Log */}
                     {activeTaskViewTab === "logs" && (
-                      <ToolLogViewer runs={agentRuns} toolCalls={toolCalls} />
+                      <ToolLogViewer runs={agentRuns} toolCalls={toolCalls} isLiveStreaming={isSseConnected} />
                     )}
 
                     {/* View 5: Human Review & Intervention Comments */}
@@ -2005,7 +2195,7 @@ export default function Home() {
                     </>
                   ) : (
                     <>
-                      <Sparkles className="w-3.5 h-3.5" />
+                      <Plus className="w-3.5 h-3.5" />
                       <span>Create & Select Issue</span>
                     </>
                   )}
@@ -2067,6 +2257,23 @@ export default function Home() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Non-blocking Modern Toast Feedback */}
+      <Toast toast={toast} onClose={() => setToast(null)} />
+
+      {/* Developer-Palette In-App Confirmation Modal */}
+      {confirmState && (
+        <ConfirmModal
+          isOpen={confirmState.isOpen}
+          title={confirmState.title}
+          message={confirmState.message}
+          confirmLabel={confirmState.confirmLabel}
+          cancelLabel={confirmState.cancelLabel}
+          isDestructive={confirmState.isDestructive}
+          onConfirm={confirmState.onConfirm}
+          onCancel={() => setConfirmState(null)}
+        />
       )}
     </div>
   );

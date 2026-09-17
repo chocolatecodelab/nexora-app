@@ -70,8 +70,16 @@ export function AuthAccountModal({
       fetchStatus();
       setErrorMessage(null);
       setSuccessMessage(null);
+
+      const handleKeyDown = (e: KeyboardEvent) => {
+        if (e.key === "Escape") {
+          onClose();
+        }
+      };
+      window.addEventListener("keydown", handleKeyDown);
+      return () => window.removeEventListener("keydown", handleKeyDown);
     }
-  }, [isOpen]);
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -92,7 +100,6 @@ export function AuthAccountModal({
         provider: "github",
         token: tokenVal,
       });
-      sessionStorage.setItem("nexora_gh_token", tokenVal);
       setSuccessMessage(`Berhasil terhubung ke GitHub sebagai @${res.username}!`);
       setGithubToken("");
       await fetchStatus();
@@ -123,8 +130,6 @@ export function AuthAccountModal({
         token: tokenVal,
         gitlab_url: urlVal,
       });
-      sessionStorage.setItem("nexora_gl_token", tokenVal);
-      sessionStorage.setItem("nexora_gl_url", urlVal);
       setSuccessMessage(`Berhasil terhubung ke GitLab sebagai @${res.username}!`);
       setGitlabToken("");
       await fetchStatus();
@@ -139,12 +144,6 @@ export function AuthAccountModal({
   const handleDisconnect = async (provider: "github" | "gitlab") => {
     try {
       await disconnectGitProvider(provider);
-      if (provider === "github") {
-        sessionStorage.removeItem("nexora_gh_token");
-      } else {
-        sessionStorage.removeItem("nexora_gl_token");
-        sessionStorage.removeItem("nexora_gl_url");
-      }
       await fetchStatus();
       setSuccessMessage(`Akun ${provider.toUpperCase()} berhasil diputuskan.`);
       onAuthUpdated?.();
@@ -155,7 +154,12 @@ export function AuthAccountModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-      <div className="bg-[#1A1D28] border border-[#2B2F3D] rounded-xl w-full max-w-lg overflow-hidden shadow-2xl space-y-0">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="auth-modal-title"
+        className="bg-[#1A1D28] border border-[#2B2F3D] rounded-xl w-full max-w-lg overflow-hidden shadow-2xl space-y-0 max-h-[90vh] flex flex-col"
+      >
         {/* Modal Header */}
         <div className="p-4 border-b border-[#2B2F3D] flex items-center justify-between bg-[#12141C]">
           <div className="flex items-center gap-2.5">
@@ -163,7 +167,7 @@ export function AuthAccountModal({
               <KeyRound className="w-4 h-4" />
             </div>
             <div>
-              <h3 className="font-heading text-sm font-bold text-[#E7E9F2]">
+              <h3 id="auth-modal-title" className="font-heading text-sm font-bold text-[#E7E9F2]">
                 Git Provider Authentication & Login
               </h3>
               <p className="text-[11px] text-[#8D91A6]">
@@ -174,6 +178,7 @@ export function AuthAccountModal({
 
           <button
             onClick={onClose}
+            aria-label="Tutup modal autentikasi"
             className="p-1.5 rounded-lg text-[#8D91A6] hover:text-[#E7E9F2] hover:bg-[#242838] transition cursor-pointer"
           >
             <X className="w-4 h-4" />
@@ -222,7 +227,7 @@ export function AuthAccountModal({
         </div>
 
         {/* Tab Body */}
-        <div className="p-5 space-y-4">
+        <div className="p-5 space-y-4 overflow-y-auto flex-1">
           {/* Notifications */}
           {errorMessage && (
             <div className="p-3 bg-[#2E181B] border border-[#EB5757]/40 rounded-lg text-xs text-[#EB5757] flex items-center gap-2">

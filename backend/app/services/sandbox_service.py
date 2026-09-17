@@ -20,7 +20,7 @@ import tempfile
 import time
 from typing import NamedTuple, Optional
 
-from app.services import supabase_client
+from app.services import event_stream, supabase_client
 
 logger = logging.getLogger(__name__)
 
@@ -33,10 +33,14 @@ ALLOWED_COMMAND_PREFIXES = (
     "npm run type-check",
     "pnpm test",
     "pnpm run test",
+    "pnpm run build",
     "yarn test",
     "pytest",
     "python -m pytest",
+    "python3 -m pytest",
 )
+
+FORBIDDEN_SHELL_CHARS = ("&", ";", "|", "`", "$", "\n", "\r", ">", "<", "(", ")")
 
 
 class TestResult(NamedTuple):
@@ -51,9 +55,38 @@ class TestResult(NamedTuple):
 
 
 def is_command_allowed(command: str) -> bool:
-    """Verify that command matches the allowed test/build whitelist."""
-    cmd_clean = command.strip().lower()
-    return any(cmd_clean.startswith(prefix) for prefix in ALLOWED_COMMAND_PREFIXES)
+    """
+    Verify that command matches the allowed test/build whitelist.
+    Strictly forbids chained shell operators (&&, ;, |, etc.), redirection,
+    and subshell execution.
+    """
+    if not command or not command.strip():
+        return False
+
+    cmd_raw = command.strip()
+
+    # Reject any dangerous shell meta-characters
+    if any(char in cmd_raw for char in FORBIDDEN_SHELL_CHARS):
+        logger.warning("Rejected command with forbidden shell metacharacters: %s", cmd_raw)
+        return False
+
+    try:
+        import shlex
+        tokens = shlex.split(cmd_raw)
+    except Exception as exc:
+        logger.warning("Failed to parse command tokens: %s (%s)", cmd_raw, exc)
+        return False
+
+    if not tokens:
+        return False
+
+    cmd_clean = " ".join(tokens).lower()
+
+    # Must match allowed prefix exactly or be followed by argument space
+    return any(
+        cmd_clean == prefix or cmd_clean.startswith(prefix + " ")
+        for prefix in ALLOWED_COMMAND_PREFIXES
+    )
 
 
 def is_docker_available() -> bool:
@@ -218,9 +251,9 @@ async def run_tests(
 
     duration_ms = int((time.time() - start_time) * 1000)
 
-    # 3. Observability: Log tool call in Supabase
+    # 3. Observability: Log tool call in Supabase & broadcast live SSE event
     try:
-        supabase_client.create_tool_call({
+        created_tc = supabase_client.create_tool_call({
             "agent_run_id": run_id,
             "tool_name": "run_test",
             "arguments": {
@@ -238,6 +271,14 @@ async def run_tests(
             },
             "status": "success" if passed else "error",
             "execution_ms": duration_ms,
+        })
+        event_stream.broadcast_task_event(task_id, "tool_call", created_tc)
+        event_stream.broadcast_task_event(task_id, "terminal_output", {
+            "command": command,
+            "output": output,
+            "passed": passed,
+            "iteration": iteration,
+            "runner": runner_type,
         })
     except Exception as exc:
         logger.warning("Could not persist tool_call to database: %s", exc)

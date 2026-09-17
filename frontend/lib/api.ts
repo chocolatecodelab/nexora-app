@@ -18,6 +18,7 @@ import {
   ToolCall,
   TaskComment,
   EvaluationMetricsResponse,
+  TaskFullDetails,
 } from "@/types";
 
 function getApiBase(): string {
@@ -200,6 +201,14 @@ export async function createTask(data: {
 
 export async function getTask(taskId: string): Promise<Task> {
   return fetcher<Task>(`/api/tasks/${taskId}`);
+}
+
+export async function getTaskFull(taskId: string): Promise<TaskFullDetails> {
+  return fetcher<TaskFullDetails>(`/api/tasks/${taskId}/full`);
+}
+
+export function getTaskStreamUrl(taskId: string): string {
+  return `${getApiBase()}/api/tasks/${taskId}/stream`;
 }
 
 export async function listTasks(projectId?: string): Promise<Task[]> {

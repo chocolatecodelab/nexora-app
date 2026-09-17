@@ -13,7 +13,6 @@ import {
   CheckCircle2,
   AlertTriangle,
   FileCode,
-  Sparkles,
 } from "lucide-react";
 
 interface SecurityGuardrailCardProps {

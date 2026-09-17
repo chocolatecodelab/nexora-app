@@ -11,16 +11,16 @@ import {
   ChevronRight,
   Code,
   Layers,
-  Sparkles,
 } from "lucide-react";
 import { AgentRun, ToolCall } from "@/types";
 
 interface ToolLogViewerProps {
   runs: AgentRun[];
   toolCalls: Record<string, ToolCall[]>;
+  isLiveStreaming?: boolean;
 }
 
-export function ToolLogViewer({ runs, toolCalls }: ToolLogViewerProps) {
+export function ToolLogViewer({ runs, toolCalls, isLiveStreaming }: ToolLogViewerProps) {
   const [expandedCalls, setExpandedCalls] = useState<Record<string, boolean>>({});
 
   const toggleExpand = (id: string) => {
@@ -47,6 +47,12 @@ export function ToolLogViewer({ runs, toolCalls }: ToolLogViewerProps) {
           <span className="text-xs font-mono font-semibold text-[#E7E9F2]">
             Live Tool Log & Audit Trail
           </span>
+          {isLiveStreaming && (
+            <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] text-[#4CB782] bg-[#4CB782]/10 border border-[#4CB782]/20 font-mono font-medium">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#4CB782] animate-pulse" />
+              Live SSE
+            </span>
+          )}
         </div>
 
         <div className="flex items-center gap-3 text-[11px] font-mono text-[#8D91A6]">
@@ -67,7 +73,7 @@ export function ToolLogViewer({ runs, toolCalls }: ToolLogViewerProps) {
       {/* Log Body */}
       {runs.length === 0 ? (
         <div className="p-8 text-center text-xs font-mono text-[#5E6275] space-y-2">
-          <Sparkles className="w-6 h-6 mx-auto text-[#5E6275] animate-pulse" />
+          <Terminal className="w-6 h-6 mx-auto text-[#5E6275] animate-pulse" />
           <p>No agent runs recorded yet. Logs will stream here during execution.</p>
         </div>
       ) : (

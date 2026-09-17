@@ -16,7 +16,7 @@ import {
   Clock,
   User,
   ShieldAlert,
-  Sparkles,
+  Bot,
   GitMerge,
   GitPullRequest,
   LayoutGrid,
@@ -464,7 +464,7 @@ export function CommitHistoryTab({ projects }: CommitHistoryTabProps) {
 
                             {node.isNexora && (
                               <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[9px] font-medium bg-[#4CB782]/15 text-[#4CB782] border border-[#4CB782]/30">
-                                <Sparkles className="w-2.5 h-2.5" /> Nexora
+                                <Bot className="w-2.5 h-2.5" /> Nexora
                               </span>
                             )}
                           </div>

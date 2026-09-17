@@ -64,9 +64,7 @@ async def delete_project(project_id: str):
     project = supabase_client.get_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    c = supabase_client._get_supabase()
-    if c:
-        c.table("projects").delete().eq("id", project_id).execute()
+    supabase_client.delete_project(project_id)
     return {"status": "deleted", "id": project_id}
 
 

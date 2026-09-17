@@ -15,7 +15,7 @@ from typing import Optional
 
 from app.config import get_settings
 from app.models.schemas import ImplementationPlan
-from app.services import gemini_service, supabase_client
+from app.services import gemini_service, patch_service, supabase_client
 
 logger = logging.getLogger(__name__)
 
@@ -26,20 +26,24 @@ Your job is to generate high-quality, production-ready code changes based on an 
 Rules:
 1. Generate complete, working code without lazy placeholders (no '// implement here').
 2. Keep edits minimal, precise, and idiomatic.
-3. Return a JSON object with:
-   - "modified_files": a list of objects with "path" (string) and "content" (complete new file content string)
+3. For existing modified files, PREFER returning targeted "diff_blocks" instead of rewriting the entire file:
+   - "search": the exact continuous snippet of lines from the original file to replace (include exact indentation).
+   - "replace": the new replacement lines.
+4. For new created files, provide the complete file content in "content".
+5. Return a JSON object with:
+   - "modified_files": a list of objects with "path" (string) and "diff_blocks" (list of {"search": str, "replace": str}) OR "content" (string)
    - "created_files": a list of objects with "path" (string) and "content" (complete new file content string)
 """
 
 
-def _truncate_file_content(content: str, max_lines: int = 300) -> str:
-    """Smartly truncate long file content to preserve imports/types and recent code while fitting token budget."""
+def _truncate_file_content(content: str, max_lines: int = 500) -> str:
+    """Intelligently preserve file content while fitting token budget."""
     lines = content.splitlines()
     if len(lines) <= max_lines:
         return content
-    head = lines[:200]
-    tail = lines[-50:]
-    return "\n".join(head) + f"\n\n// ... [{len(lines) - 250} lines truncated for token optimization] ...\n\n" + "\n".join(tail)
+    head = lines[:350]
+    tail = lines[-100:]
+    return "\n".join(head) + f"\n\n// ... [{len(lines) - 450} lines omitted for context budget — use SEARCH/REPLACE blocks for targeted edits] ...\n\n" + "\n".join(tail)
 
 
 async def implement_plan(
@@ -53,6 +57,7 @@ async def implement_plan(
 ) -> dict:
     """
     Execute the coding phase using Gemini AI with multimodal attachment support.
+    Applies search/replace block diffs to avoid destructive whole-file rewrites.
     Logs each file edit/creation as a tool call in the audit trail.
     """
     settings = get_settings()
@@ -62,12 +67,16 @@ async def implement_plan(
     context_prompt += f"## Approved Implementation Plan\n{json.dumps(plan.model_dump(), indent=2)}\n\n"
     context_prompt += "## Existing Files Content\n"
 
-    # Truncate each existing file to optimize token usage
+    # Provide existing files context
     for path, content in existing_files.items():
         truncated_content = _truncate_file_content(content)
         context_prompt += f"\n--- {path} ---\n{truncated_content}\n"
 
-    context_prompt += "\n## Task\nGenerate all modified and created files required by the plan."
+    context_prompt += (
+        "\n## Task\n"
+        "Generate all modified and created files required by the plan.\n"
+        "For modified_files, supply precise 'diff_blocks' ({search, replace}) matching original lines.\n"
+    )
 
     multimodal_contents = gemini_service._prepare_multimodal_contents(context_prompt, attachments)
     estimated_tokens = len(context_prompt) // 4
@@ -105,9 +114,20 @@ async def implement_plan(
                                             "type": "object",
                                             "properties": {
                                                 "path": {"type": "string"},
+                                                "diff_blocks": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "search": {"type": "string"},
+                                                            "replace": {"type": "string"},
+                                                        },
+                                                        "required": ["search", "replace"],
+                                                    },
+                                                },
                                                 "content": {"type": "string"},
                                             },
-                                            "required": ["path", "content"],
+                                            "required": ["path"],
                                         },
                                     },
                                     "created_files": {
@@ -143,6 +163,22 @@ async def implement_plan(
 
     if not data:
         data = _fallback_code_generation(plan)
+
+    # Apply Search/Replace diff blocks onto existing file contents
+    processed_modified = []
+    for mod in data.get("modified_files", []):
+        path = mod.get("path", "")
+        original_content = existing_files.get(path, "")
+        patched_content, ok, logs = patch_service.apply_file_patch(original_content, mod)
+        if not ok:
+            logger.warning("File '%s' patch warning: %s", path, "; ".join(logs))
+        processed_modified.append({
+            "path": path,
+            "content": patched_content,
+            "diff_blocks": mod.get("diff_blocks", []),
+        })
+
+    data["modified_files"] = processed_modified
 
     duration_ms = int((time.time() - start_time) * 1000)
 

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   FileCheck2,
   CheckCircle,
@@ -36,6 +36,18 @@ export function PlanReviewModal({
   const [showRawJson, setShowRawJson] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
 
+  useEffect(() => {
+    if (isOpen) {
+      const handleKeyDown = (e: KeyboardEvent) => {
+        if (e.key === "Escape") {
+          onClose();
+        }
+      };
+      window.addEventListener("keydown", handleKeyDown);
+      return () => window.removeEventListener("keydown", handleKeyDown);
+    }
+  }, [isOpen, onClose]);
+
   if (!isOpen || !task.plan_json) return null;
 
   const plan: ImplementationPlan = task.plan_json;
@@ -65,7 +77,12 @@ export function PlanReviewModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 overflow-y-auto">
-      <div className="glass-panel-glow max-w-2xl w-full rounded-2xl p-6 shadow-2xl animate-in fade-in zoom-in duration-200 border border-slate-700 max-h-[90vh] flex flex-col">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="approval-modal-title"
+        className="glass-panel-glow max-w-2xl w-full rounded-2xl p-6 shadow-2xl animate-in fade-in zoom-in duration-200 border border-slate-700 max-h-[90vh] flex flex-col"
+      >
         {/* Header */}
         <div className="flex items-center justify-between pb-4 border-b border-white/5 shrink-0">
           <div className="flex items-center gap-3">
@@ -74,7 +91,7 @@ export function PlanReviewModal({
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="text-base font-bold text-white">Human Approval Gate</h3>
+                <h3 id="approval-modal-title" className="text-base font-bold text-white">Human Approval Gate</h3>
                 <span
                   className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider ${
                     plan.risk === "high"

@@ -75,7 +75,7 @@ class PlanRisk(str, enum.Enum):
 class ImplementationPlan(BaseModel):
     """Structured plan output from the Planning Agent — PRD Section 7.5."""
     summary: str = Field(..., description="High-level summary of the proposed changes")
-    risk: PlanRisk = Field(..., description="Risk assessment: low, medium, or high")
+    risk: PlanRisk = Field(default=PlanRisk.LOW, description="Risk assessment: low, medium, or high")
     files_to_modify: list[str] = Field(default_factory=list, description="Existing files to change")
     files_to_create: list[str] = Field(default_factory=list, description="New files to create")
     steps: list[str] = Field(..., description="Ordered implementation steps")
@@ -323,6 +323,14 @@ class TaskCommentResponse(BaseModel):
     is_intervention: bool = False
     task_status_at: Optional[str] = None  # Task status when comment was posted
     created_at: datetime
+
+
+class TaskFullDetails(BaseModel):
+    """Aggregated response combining task, runs, tool calls, and comments in a single query."""
+    task: TaskResponse
+    runs: list[AgentRunResponse] = []
+    tool_calls: dict[str, list[ToolCallResponse]] = {}
+    comments: list[TaskCommentResponse] = []
 
 
 # ============================================================

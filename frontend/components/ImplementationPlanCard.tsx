@@ -9,7 +9,7 @@ import {
   X,
   Loader2,
   Code,
-  Sparkles,
+  Cpu,
   AlertCircle,
   Clock,
   ShieldCheck,
@@ -32,6 +32,7 @@ export function ImplementationPlanCard({
   const [showRejectInput, setShowRejectInput] = useState(false);
   const [showRawJson, setShowRawJson] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const plan: ImplementationPlan | undefined = task.plan_json || undefined;
   const isAwaitingApproval = task.status === "awaiting_approval";
@@ -41,8 +42,12 @@ export function ImplementationPlanCard({
 
   const handleApprove = async () => {
     setIsSubmitting(true);
+    setActionError(null);
     try {
       await onApprove(task.id);
+    } catch (err: any) {
+      console.error("Failed to approve plan:", err);
+      setActionError(err instanceof Error ? err.message : "Gagal menyetujui plan. Pastikan koneksi backend aktif.");
     } finally {
       setIsSubmitting(false);
     }
@@ -51,10 +56,14 @@ export function ImplementationPlanCard({
   const handleReject = async () => {
     if (!feedbackText.trim()) return;
     setIsSubmitting(true);
+    setActionError(null);
     try {
       await onReject(task.id, feedbackText.trim());
       setShowRejectInput(false);
       setFeedbackText("");
+    } catch (err: any) {
+      console.error("Failed to reject plan:", err);
+      setActionError(err instanceof Error ? err.message : "Gagal mengirimkan revisi plan. Silakan coba lagi.");
     } finally {
       setIsSubmitting(false);
     }
@@ -67,7 +76,7 @@ export function ImplementationPlanCard({
         <div className="bg-[#1A1D28] rounded-[10px] border border-[#2B2F3D] p-6 space-y-5 animate-pulse">
           <div className="flex items-center justify-between pb-3 border-b border-[#2B2F3D]">
             <div className="flex items-center gap-2.5">
-              <Sparkles className="w-4 h-4 text-[#E3A73B] animate-spin" />
+              <Cpu className="w-4 h-4 text-[#E3A73B] animate-pulse" />
               <div>
                 <span className="text-[10px] uppercase font-bold tracking-wider text-[#E3A73B]">
                   {task.status === "analyzing_issue" && "Phase 1: Analyzing Issue Requirements..."}
@@ -314,13 +323,22 @@ export function ImplementationPlanCard({
             </div>
           </div>
 
+          {/* Action error banner */}
+          {actionError && (
+            <div className="p-3 bg-[#2E1D1B] border border-[#E0594A]/50 rounded-[8px] text-xs text-[#E0594A] flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{actionError}</span>
+            </div>
+          )}
+
           {/* In-place feedback textarea when Reject is clicked */}
           {showRejectInput && (
             <div className="space-y-2 pt-2 border-t border-[#3A3F52]">
-              <label className="block text-xs font-medium text-[#E0594A]">
+              <label htmlFor="plan-revision-feedback" className="block text-xs font-medium text-[#E0594A]">
                 Apa yang perlu diubah dari plan ini?
               </label>
               <textarea
+                id="plan-revision-feedback"
                 rows={3}
                 placeholder="Misal: Gunakan helper auth yang sudah ada di src/utils/auth.ts daripada membuat file baru..."
                 value={feedbackText}

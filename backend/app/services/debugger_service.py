@@ -14,7 +14,7 @@ import time
 from typing import Optional
 
 from app.config import get_settings
-from app.services import gemini_service, supabase_client
+from app.services import gemini_service, patch_service, supabase_client
 
 logger = logging.getLogger(__name__)
 
@@ -22,10 +22,13 @@ DEBUGGER_SYSTEM_PROMPT = """\
 You are Nexora's Debugger Agent — an expert at diagnosing and fixing test failures.
 Given a test failure log and the relevant source code, identify the root cause and provide a fix.
 
-Return a JSON object with:
+Rules:
+1. Identify the minimal, precise change needed to resolve the error.
+2. For existing files, PREFER returning targeted "diff_blocks" with "search" and "replace" to avoid whole-file overwrites.
+3. Return a JSON object with:
 - "root_cause": concise explanation of why the test failed
 - "fix_summary": what changes were made to fix it
-- "patched_files": list of objects with "path" and "content" (updated complete file content)
+- "patched_files": list of objects with "path" (string) and "diff_blocks" (list of {"search": str, "replace": str}) OR "content" (string)
 """
 
 
@@ -36,7 +39,7 @@ async def diagnose_and_fix(
     current_files: dict[str, str],
 ) -> dict:
     """
-    Diagnose a test failure and generate corrective code changes.
+    Diagnose a test failure and generate corrective code changes using targeted diff blocks.
     """
     settings = get_settings()
     client = gemini_service._get_client()
@@ -46,7 +49,7 @@ async def diagnose_and_fix(
     for path, content in current_files.items():
         prompt += f"\n--- {path} ---\n{content}\n"
 
-    prompt += "\n## Task\nDiagnose the error and provide the patched file content."
+    prompt += "\n## Task\nDiagnose the error and provide targeted diff_blocks or patched file content."
 
     start_time = time.time()
 
@@ -70,9 +73,20 @@ async def diagnose_and_fix(
                                         "type": "object",
                                         "properties": {
                                             "path": {"type": "string"},
+                                            "diff_blocks": {
+                                                "type": "array",
+                                                "items": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "search": {"type": "string"},
+                                                        "replace": {"type": "string"},
+                                                    },
+                                                    "required": ["search", "replace"],
+                                                },
+                                            },
                                             "content": {"type": "string"},
                                         },
-                                        "required": ["path", "content"],
+                                        "required": ["path"],
                                     },
                                 },
                             },
@@ -96,6 +110,22 @@ async def diagnose_and_fix(
             "fix_summary": "Added strict Date.now() < expiresAt boundary condition",
             "patched_files": [],
         }
+
+    # Apply diff blocks / patches onto current files
+    processed_patched = []
+    for patch in data.get("patched_files", []):
+        path = patch.get("path", "")
+        original_content = current_files.get(path, "")
+        patched_content, ok, logs = patch_service.apply_file_patch(original_content, patch)
+        if not ok:
+            logger.warning("Debugger patch for '%s' had issues: %s", path, "; ".join(logs))
+        processed_patched.append({
+            "path": path,
+            "content": patched_content,
+            "diff_blocks": patch.get("diff_blocks", []),
+        })
+
+    data["patched_files"] = processed_patched
 
     duration_ms = int((time.time() - start_time) * 1000)
 
